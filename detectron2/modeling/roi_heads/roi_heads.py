@@ -802,7 +802,9 @@ class StandardROIHeads(ROIHeads):
                         proposals_per_image.proposal_boxes = Boxes(pred_boxes_per_image)
             return losses
         else:
-            pred_instances, _ = self.box_predictor.inference(predictions, proposals)
+            pred_instances, nms_survivors = self.box_predictor.inference(predictions, proposals)
+            softmax = nn.functional.softmax(predictions[0][nms_survivors], dim=1)
+            pred_instances[0].set("softmax", softmax)
             return pred_instances
 
     def _forward_mask(self, features: Dict[str, torch.Tensor], instances: List[Instances]):

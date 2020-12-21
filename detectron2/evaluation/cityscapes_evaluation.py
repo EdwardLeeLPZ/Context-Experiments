@@ -7,6 +7,7 @@ import tempfile
 from collections import OrderedDict
 import torch
 from PIL import Image
+import json
 
 from detectron2.data import MetadataCatalog
 from detectron2.utils import comm
@@ -56,14 +57,17 @@ class CityscapesInstanceEvaluator(CityscapesEvaluator):
 
     def process(self, inputs, outputs):
         from cityscapesscripts.helpers.labels import name2label
+        proposals = outputs[1]
+        outputs = outputs[0]
 
-        for input, output in zip(inputs, outputs):
+        for input, output, props in zip(inputs, outputs, proposals):
             file_name = input["file_name"]
             basename = os.path.splitext(os.path.basename(file_name))[0]
             pred_txt = os.path.join(self._temp_dir, basename + "_pred.txt")
 
             if "instances" in output:
                 output = output["instances"].to(self._cpu_device)
+                props = props["instances"].to(self._cpu_device)
                 num_instances = len(output)
                 with open(pred_txt, "w") as fout:
                     for i in range(num_instances):
@@ -80,6 +84,37 @@ class CityscapesInstanceEvaluator(CityscapesEvaluator):
                         fout.write(
                             "{} {} {}\n".format(os.path.basename(png_filename), class_id, score)
                         )
+
+                # save data for context experiment
+                city = basename.split('_')[0]
+                if not os.path.exists(f"./output/context_data/{city}/"):
+                    os.makedirs(f"./output/context_data/{city}/")
+
+                json_file = {}
+
+                # add proposal data
+                json_file["proposals"] = []
+                for idx in range(len(props)):
+                    json_file["proposals"].append(
+                        {"coords": props.proposal_boxes.tensor[idx].tolist(),
+                         "softmax": torch.nn.functional.sigmoid(props.objectness_logits[idx]).tolist()}
+                    )
+
+
+                # add refined box data
+                json_file["refined_boxes"] = []
+                print(output._fields.keys())
+                for idx in range(len(output)):
+                    json_file["refined_boxes"].append(
+                        {"coords": output.pred_boxes.tensor[idx].tolist(),
+                         "softmax": output.softmax[idx].tolist()}
+                    )
+
+                with open(
+                    os.path.join(f"./output/context_data/{city}/", basename + "_context_data.json"),
+                    'w') as outfile:
+                    json.dump(json_file, outfile, indent=4)
+
             else:
                 # Cityscapes requires a prediction file for every ground truth image.
                 with open(pred_txt, "w") as fout:
