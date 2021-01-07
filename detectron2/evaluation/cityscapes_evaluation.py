@@ -21,7 +21,7 @@ class CityscapesEvaluator(DatasetEvaluator):
     Base class for evaluation using cityscapes API.
     """
 
-    def __init__(self, dataset_name):
+    def __init__(self, dataset_name, json_output_dir):
         """
         Args:
             dataset_name (str): the name of the dataset.
@@ -31,6 +31,7 @@ class CityscapesEvaluator(DatasetEvaluator):
         self._metadata = MetadataCatalog.get(dataset_name)
         self._cpu_device = torch.device("cpu")
         self._logger = logging.getLogger(__name__)
+        self._output_dir = os.path.join(json_output_dir, 'json_records')
 
     def reset(self):
         self._working_dir = tempfile.TemporaryDirectory(prefix="cityscapes_eval_")
@@ -87,8 +88,9 @@ class CityscapesInstanceEvaluator(CityscapesEvaluator):
 
                 # save data for context experiment
                 city = basename.split('_')[0]
-                if not os.path.exists(f"./output/context_data/{city}/"):
-                    os.makedirs(f"./output/context_data/{city}/")
+                output_path = os.path.join(self._output_dir, city)
+                if not os.path.exists(output_path):
+                    os.makedirs(output_path)
 
                 json_file = {}
 
@@ -103,7 +105,6 @@ class CityscapesInstanceEvaluator(CityscapesEvaluator):
 
                 # add refined box data
                 json_file["refined_boxes"] = []
-                print(output._fields.keys())
                 for idx in range(len(output)):
                     json_file["refined_boxes"].append(
                         {"coords": output.pred_boxes.tensor[idx].tolist(),
@@ -111,7 +112,7 @@ class CityscapesInstanceEvaluator(CityscapesEvaluator):
                     )
 
                 with open(
-                    os.path.join(f"./output/context_data/{city}/", basename + "_context_data.json"),
+                    os.path.join(output_path, basename + "_context_data.json"),
                     'w') as outfile:
                     json.dump(json_file, outfile, indent=4)
 
