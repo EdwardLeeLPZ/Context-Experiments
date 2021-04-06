@@ -44,8 +44,8 @@ class PanopticDeepLab(nn.Module):
         self.backbone = build_backbone(cfg)
         self.sem_seg_head = build_sem_seg_head(cfg, self.backbone.output_shape())
         self.ins_embed_head = build_ins_embed_branch(cfg, self.backbone.output_shape())
-        self.register_buffer("pixel_mean", torch.Tensor(cfg.MODEL.PIXEL_MEAN).view(-1, 1, 1))
-        self.register_buffer("pixel_std", torch.Tensor(cfg.MODEL.PIXEL_STD).view(-1, 1, 1))
+        self.register_buffer("pixel_mean", torch.tensor(cfg.MODEL.PIXEL_MEAN).view(-1, 1, 1), False)
+        self.register_buffer("pixel_std", torch.tensor(cfg.MODEL.PIXEL_STD).view(-1, 1, 1), False)
         self.meta = MetadataCatalog.get(cfg.DATASETS.TRAIN[0])
         self.stuff_area = cfg.MODEL.PANOPTIC_DEEPLAB.STUFF_AREA
         self.threshold = cfg.MODEL.PANOPTIC_DEEPLAB.CENTER_THRESHOLD
@@ -246,8 +246,8 @@ class PanopticDeepLabSemSegHead(DeepLabV3PlusHead):
         Args:
             input_shape (ShapeSpec): shape of the input feature
             decoder_channels (list[int]): a list of output channels of each
-                decoder stage. It should have the same length as "in_features"
-                (each element in "in_features" corresponds to one decoder stage).
+                decoder stage. It should have the same length as "input_shape"
+                (each element in "input_shape" corresponds to one decoder stage).
             norm (str or callable): normalization for all conv layers.
             head_channels (int): the output channels of extra convolutions
                 between decoder and predictor.
@@ -385,8 +385,8 @@ class PanopticDeepLabInsEmbedHead(DeepLabV3PlusHead):
         Args:
             input_shape (ShapeSpec): shape of the input feature
             decoder_channels (list[int]): a list of output channels of each
-                decoder stage. It should have the same length as "in_features"
-                (each element in "in_features" corresponds to one decoder stage).
+                decoder stage. It should have the same length as "input_shape"
+                (each element in "input_shape" corresponds to one decoder stage).
             norm (str or callable): normalization for all conv layers.
             head_channels (int): the output channels of extra convolutions
                 between decoder and predictor.
@@ -483,8 +483,9 @@ class PanopticDeepLabInsEmbedHead(DeepLabV3PlusHead):
             len(cfg.MODEL.INS_EMBED_HEAD.IN_FEATURES) - 1
         ) + [cfg.MODEL.INS_EMBED_HEAD.ASPP_CHANNELS]
         ret = dict(
-            input_shape=input_shape,
-            in_features=cfg.MODEL.INS_EMBED_HEAD.IN_FEATURES,
+            input_shape={
+                k: v for k, v in input_shape.items() if k in cfg.MODEL.INS_EMBED_HEAD.IN_FEATURES
+            },
             project_channels=cfg.MODEL.INS_EMBED_HEAD.PROJECT_CHANNELS,
             aspp_dilations=cfg.MODEL.INS_EMBED_HEAD.ASPP_DILATIONS,
             aspp_dropout=cfg.MODEL.INS_EMBED_HEAD.ASPP_DROPOUT,

@@ -5,7 +5,7 @@ import logging
 import numpy as np
 from collections import UserDict, defaultdict
 from dataclasses import dataclass
-from typing import Any, Callable, Collection, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Callable, Collection, Dict, Iterable, List, Optional, Sequence, Tuple
 import torch
 from torch.utils.data.dataset import Dataset
 
@@ -16,6 +16,7 @@ from detectron2.data.build import (
     load_proposals_into_dataset,
     print_instances_class_histogram,
     trivial_batch_collator,
+    worker_init_reset_seed,
 )
 from detectron2.data.catalog import DatasetCatalog, Metadata, MetadataCatalog
 from detectron2.data.samplers import TrainingSampler
@@ -25,8 +26,7 @@ from densepose.config import get_bootstrap_dataset_config
 
 from .combined_loader import CombinedDataLoader, Loader
 from .dataset_mapper import DatasetMapper
-from .datasets.coco import DENSEPOSE_KEYS_WITHOUT_MASK as DENSEPOSE_COCO_KEYS_WITHOUT_MASK
-from .datasets.coco import DENSEPOSE_MASK_KEY as DENSEPOSE_COCO_MASK_KEY
+from .datasets.coco import DENSEPOSE_CSE_KEYS_WITHOUT_MASK, DENSEPOSE_IUV_KEYS_WITHOUT_MASK
 from .datasets.dataset_type import DatasetType
 from .inference_based_loader import InferenceBasedLoader, ScoreBasedFilter
 from .samplers import (
@@ -36,6 +36,7 @@ from .samplers import (
     PredictionToGroundTruthSampler,
 )
 from .transform import ImageResizeTransform
+from .utils import get_class_to_mesh_name_mapping
 from .video import (
     FirstKFramesSelector,
     FrameSelectionStrategy,
@@ -194,8 +195,8 @@ def _maybe_create_densepose_keep_instance_predicate(cfg: CfgNode) -> Optional[In
 
     def has_densepose_annotations(instance: Instance) -> bool:
         for ann in instance["annotations"]:
-            if all(key in ann for key in DENSEPOSE_COCO_KEYS_WITHOUT_MASK) and (
-                (DENSEPOSE_COCO_MASK_KEY in ann) or ("segmentation" in ann)
+            if all(key in ann for key in DENSEPOSE_IUV_KEYS_WITHOUT_MASK) or all(
+                key in ann for key in DENSEPOSE_CSE_KEYS_WITHOUT_MASK
             ):
                 return True
             if use_masks and "segmentation" in ann:
@@ -283,13 +284,6 @@ def _add_category_maps_to_metadata(cfg: CfgNode):
         meta.category_map = category_map
         logger = logging.getLogger(__name__)
         logger.info("Category maps for dataset {}: {}".format(dataset_name, meta.category_map))
-
-
-def get_class_to_mesh_name_mapping(cfg):
-    return {
-        int(class_id): mesh_name
-        for class_id, mesh_name in cfg.DATASETS.CLASS_TO_MESH_NAME_MAPPING.items()
-    }
 
 
 def _maybe_add_class_to_mesh_name_map_to_metadata(dataset_names: List[str], cfg: CfgNode):
@@ -383,6 +377,9 @@ def combine_detection_dataset_dicts(
     # cat_id -> [(orig_cat_id, cat_name, dataset_name)]
     merged_categories = _merge_categories(dataset_names)
     _warn_if_merged_different_categories(merged_categories)
+    merged_category_names = [
+        merged_categories[cat_id][0].mapped_name for cat_id in sorted(merged_categories)
+    ]
     # map to contiguous category IDs
     _add_category_id_to_contiguous_id_maps_to_metadata(merged_categories)
     # load annotations and dataset metadata
@@ -392,9 +389,7 @@ def combine_detection_dataset_dicts(
         if proposal_file is not None:
             dataset_dicts = load_proposals_into_dataset(dataset_dicts, proposal_file)
         dataset_dicts = _maybe_filter_and_map_categories(dataset_name, dataset_dicts)
-        print_instances_class_histogram(
-            dataset_dicts, MetadataCatalog.get(dataset_name).thing_classes
-        )
+        print_instances_class_histogram(dataset_dicts, merged_category_names)
         dataset_name_to_dicts[dataset_name] = dataset_dicts
 
     if keep_instance_predicate is not None:
@@ -475,10 +470,13 @@ def build_detection_test_loader(cfg, dataset_name, mapper=None):
         if cfg.MODEL.LOAD_PROPOSALS
         else None,
     )
+    sampler = None
+    if not cfg.DENSEPOSE_EVALUATION.DISTRIBUTED_INFERENCE:
+        sampler = torch.utils.data.SequentialSampler(dataset_dicts)
     if mapper is None:
         mapper = DatasetMapper(cfg, False)
     return d2_build_detection_test_loader(
-        dataset_dicts, mapper=mapper, num_workers=cfg.DATALOADER.NUM_WORKERS
+        dataset_dicts, mapper=mapper, num_workers=cfg.DATALOADER.NUM_WORKERS, sampler=sampler
     )
 
 
@@ -603,11 +601,12 @@ def build_inference_based_loader(
     dataset = build_bootstrap_dataset(dataset_cfg.DATASET, dataset_cfg.IMAGE_LOADER)
     training_sampler = TrainingSampler(len(dataset))
     data_loader = torch.utils.data.DataLoader(
-        dataset,
+        dataset,  # pyre-ignore[6]
         batch_size=dataset_cfg.IMAGE_LOADER.BATCH_SIZE,
         sampler=training_sampler,
         num_workers=dataset_cfg.IMAGE_LOADER.NUM_WORKERS,
         collate_fn=trivial_batch_collator,
+        worker_init_fn=worker_init_reset_seed,
     )
     return InferenceBasedLoader(
         model,
@@ -630,7 +629,7 @@ def has_inference_based_loaders(cfg: CfgNode) -> bool:
 
 def build_inference_based_loaders(
     cfg: CfgNode, model: torch.nn.Module
-) -> List[InferenceBasedLoader]:
+) -> Tuple[List[InferenceBasedLoader], List[float]]:
     loaders = []
     ratios = []
     for dataset_spec in cfg.BOOTSTRAP_DATASETS:
@@ -649,7 +648,8 @@ def build_video_list_dataset(meta: Metadata, cfg: CfgNode):
         frame_selector = build_frame_selector(cfg.SELECT)
         transform = build_transform(cfg.TRANSFORM, data_type="image")
         video_list = video_list_from_file(video_list_fpath, video_base_path)
-        return VideoKeyframeDataset(video_list, frame_selector, transform)
+        keyframe_helper_fpath = cfg.KEYFRAME_HELPER if hasattr(cfg, "KEYFRAME_HELPER") else None
+        return VideoKeyframeDataset(video_list, frame_selector, transform, keyframe_helper_fpath)
 
 
 class _BootstrapDatasetFactoryCatalog(UserDict):

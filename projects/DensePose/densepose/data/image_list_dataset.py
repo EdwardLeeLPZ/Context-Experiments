@@ -41,7 +41,8 @@ class ImageListDataset(Dataset):
         try:
             image = torch.from_numpy(np.ascontiguousarray(read_image(fpath, format="BGR")))
             if self.transform is not None:
-                image = self.transform(image.unsqueeze(0))[0]  # Transforms are done on batches
+                # Transforms are done on batches
+                image = self.transform(image.unsqueeze(0))[0]  # pyre-ignore[29]
             return image
         except (OSError, RuntimeError) as e:
             logger = logging.getLogger(__name__)

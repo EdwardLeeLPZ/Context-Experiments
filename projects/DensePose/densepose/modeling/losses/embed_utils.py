@@ -13,7 +13,7 @@ from .utils import AnnotationsAccumulator
 class PackedCseAnnotations:
     x_gt: torch.Tensor
     y_gt: torch.Tensor
-    coarse_segm_gt: torch.Tensor
+    coarse_segm_gt: Optional[torch.Tensor]
     vertex_mesh_ids_gt: torch.Tensor
     vertex_ids_gt: torch.Tensor
     bbox_xywh_gt: torch.Tensor
@@ -69,11 +69,12 @@ class CseAnnotationsAccumulator(AnnotationsAccumulator):
         ):
             # no densepose GT for the detections, just increase the bbox index
             self.nxt_bbox_index += n_matches
+            return
         for box_xywh_est, box_xywh_gt, dp_gt in zip(
             boxes_xywh_est, boxes_xywh_gt, instances_one_image.gt_densepose
         ):
             if (dp_gt is not None) and (len(dp_gt.x) > 0):
-                self._do_accumulate(box_xywh_gt, box_xywh_est, dp_gt)
+                self._do_accumulate(box_xywh_gt, box_xywh_est, dp_gt)  # pyre-ignore[6]
             self.nxt_bbox_index += 1
 
     def _do_accumulate(self, box_xywh_gt: torch.Tensor, box_xywh_est: torch.Tensor, dp_gt: Any):
@@ -91,7 +92,8 @@ class CseAnnotationsAccumulator(AnnotationsAccumulator):
         """
         self.x_gt.append(dp_gt.x)
         self.y_gt.append(dp_gt.y)
-        self.s_gt.append(dp_gt.segm.unsqueeze(0))
+        if hasattr(dp_gt, "segm"):
+            self.s_gt.append(dp_gt.segm.unsqueeze(0))
         self.vertex_ids_gt.append(dp_gt.vertex_ids)
         self.vertex_mesh_ids_gt.append(torch.full_like(dp_gt.vertex_ids, dp_gt.mesh_id))
         self.bbox_xywh_gt.append(box_xywh_gt.view(-1, 4))
@@ -119,7 +121,10 @@ class CseAnnotationsAccumulator(AnnotationsAccumulator):
             y_gt=torch.cat(self.y_gt, 0),
             vertex_mesh_ids_gt=torch.cat(self.vertex_mesh_ids_gt, 0),
             vertex_ids_gt=torch.cat(self.vertex_ids_gt, 0),
-            coarse_segm_gt=torch.cat(self.s_gt, 0),
+            # ignore segmentation annotations, if not all the instances contain those
+            coarse_segm_gt=torch.cat(self.s_gt, 0)
+            if len(self.s_gt) == len(self.bbox_xywh_gt)
+            else None,
             bbox_xywh_gt=torch.cat(self.bbox_xywh_gt, 0),
             bbox_xywh_est=torch.cat(self.bbox_xywh_est, 0),
             point_bbox_with_dp_indices=torch.cat(self.point_bbox_with_dp_indices, 0),

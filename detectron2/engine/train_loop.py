@@ -5,12 +5,13 @@ import logging
 import numpy as np
 import time
 import weakref
-from typing import Dict
+from typing import Dict, List, Optional
 import torch
 from torch.nn.parallel import DataParallel, DistributedDataParallel
 
 import detectron2.utils.comm as comm
 from detectron2.utils.events import EventStorage, get_event_storage
+from detectron2.utils.logger import _log_api_usage
 
 __all__ = ["HookBase", "TrainerBase", "SimpleTrainer", "AMPTrainer"]
 
@@ -94,10 +95,15 @@ class TrainerBase:
         storage(EventStorage): An EventStorage that's opened during the course of training.
     """
 
-    def __init__(self):
-        self._hooks = []
+    def __init__(self) -> None:
+        self._hooks: List[HookBase] = []
+        self.iter: int
+        self.start_iter: int
+        self.max_iter: int
+        self.storage: EventStorage
+        _log_api_usage("trainer." + self.__class__.__name__)
 
-    def register_hooks(self, hooks):
+    def register_hooks(self, hooks: List[Optional[HookBase]]) -> None:
         """
         Register hooks to the trainer. The hooks are executed in the order
         they are registered.
@@ -244,23 +250,24 @@ class SimpleTrainer(TrainerBase):
         """
         self.optimizer.step()
 
-    def _write_metrics(self, loss_dict: Dict[str, torch.Tensor], data_time: float):
+    def _write_metrics(
+        self,
+        loss_dict: Dict[str, torch.Tensor],
+        data_time: float,
+        prefix: str = "",
+    ):
         """
         Args:
             loss_dict (dict): dict of scalar losses
             data_time (float): time taken by the dataloader iteration
         """
-        device = next(iter(loss_dict.values())).device
+        metrics_dict = {k: v.detach().cpu().item() for k, v in loss_dict.items()}
+        metrics_dict["data_time"] = data_time
 
-        # Use a new stream so these ops don't wait for DDP or backward
-        with torch.cuda.stream(torch.cuda.Stream() if device.type == "cuda" else None):
-            metrics_dict = {k: v.detach().cpu().item() for k, v in loss_dict.items()}
-            metrics_dict["data_time"] = data_time
-
-            # Gather metrics among all workers for logging
-            # This assumes we do DDP-style training, which is currently the only
-            # supported method in detectron2.
-            all_metrics_dict = comm.gather(metrics_dict)
+        # Gather metrics among all workers for logging
+        # This assumes we do DDP-style training, which is currently the only
+        # supported method in detectron2.
+        all_metrics_dict = comm.gather(metrics_dict)
 
         if comm.is_main_process():
             storage = get_event_storage()
@@ -281,7 +288,7 @@ class SimpleTrainer(TrainerBase):
                     f"loss_dict = {metrics_dict}"
                 )
 
-            storage.put_scalar("total_loss", total_losses_reduced)
+            storage.put_scalar("{}total_loss".format(prefix), total_losses_reduced)
             if len(metrics_dict) > 1:
                 storage.put_scalars(**metrics_dict)
 

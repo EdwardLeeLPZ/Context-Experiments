@@ -1,6 +1,6 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
 import numpy as np
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 import cv2
 import torch
 
@@ -11,7 +11,7 @@ from .base import Boxes, Image
 from .densepose_results import DensePoseResultsVisualizer
 
 
-def get_texture_atlas(path: Optional[str]) -> np.ndarray:
+def get_texture_atlas(path: Optional[str]) -> Optional[np.ndarray]:
     if path is None:
         return None
 
@@ -31,15 +31,18 @@ class DensePoseResultsVisualizerWithTexture(DensePoseResultsVisualizer):
         assert self.body_part_size == texture_atlas.shape[1] // 4
 
     def visualize(
-        self, image_bgr: Image, results_and_boxes_xywh: Optional[Tuple[DensePoseChartResult, Boxes]]
+        self,
+        image_bgr: Image,
+        results_and_boxes_xywh: Tuple[Optional[List[DensePoseChartResult]], Optional[Boxes]],
     ) -> Image:
-        if results_and_boxes_xywh[0] is None:
-            return image_bgr
         densepose_result, boxes_xywh = results_and_boxes_xywh
+        if densepose_result is None or boxes_xywh is None:
+            return image_bgr
+
         boxes_xywh = boxes_xywh.int().cpu().numpy()
         texture_image, alpha = self.get_texture()
         for i, result in enumerate(densepose_result):
-            iuv_array = torch.cat((result.labels[None], result.uv.clip(0, 1)))
+            iuv_array = torch.cat((result.labels[None], result.uv.clamp(0, 1)))
             x, y, w, h = boxes_xywh[i]
             bbox_image = image_bgr[y : y + h, x : x + w]
             image_bgr[y : y + h, x : x + w] = self.generate_image_with_texture(

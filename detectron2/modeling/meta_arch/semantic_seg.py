@@ -1,6 +1,6 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
 import numpy as np
-from typing import Callable, Dict, List, Optional, Union
+from typing import Callable, Dict, Optional, Tuple, Union
 import fvcore.nn.weight_init as weight_init
 import torch
 from torch import nn
@@ -11,7 +11,7 @@ from detectron2.layers import Conv2d, ShapeSpec, get_norm
 from detectron2.structures import ImageList
 from detectron2.utils.registry import Registry
 
-from ..backbone import build_backbone
+from ..backbone import Backbone, build_backbone
 from ..postprocessing import sem_seg_postprocess
 from .build import META_ARCH_REGISTRY
 
@@ -31,12 +31,38 @@ class SemanticSegmentor(nn.Module):
     Main class for semantic segmentation architectures.
     """
 
-    def __init__(self, cfg):
+    @configurable
+    def __init__(
+        self,
+        *,
+        backbone: Backbone,
+        sem_seg_head: nn.Module,
+        pixel_mean: Tuple[float],
+        pixel_std: Tuple[float]
+    ):
+        """
+        Args:
+            backbone: a backbone module, must follow detectron2's backbone interface
+            sem_seg_head: a module that predicts semantic segmentation from backbone features
+            pixel_mean, pixel_std: list or tuple with #channels element, representing
+                the per-channel mean and std to be used to normalize the input image
+        """
         super().__init__()
-        self.backbone = build_backbone(cfg)
-        self.sem_seg_head = build_sem_seg_head(cfg, self.backbone.output_shape())
-        self.register_buffer("pixel_mean", torch.Tensor(cfg.MODEL.PIXEL_MEAN).view(-1, 1, 1))
-        self.register_buffer("pixel_std", torch.Tensor(cfg.MODEL.PIXEL_STD).view(-1, 1, 1))
+        self.backbone = backbone
+        self.sem_seg_head = sem_seg_head
+        self.register_buffer("pixel_mean", torch.tensor(pixel_mean).view(-1, 1, 1), False)
+        self.register_buffer("pixel_std", torch.tensor(pixel_std).view(-1, 1, 1), False)
+
+    @classmethod
+    def from_config(cls, cfg):
+        backbone = build_backbone(cfg)
+        sem_seg_head = build_sem_seg_head(cfg, backbone.output_shape())
+        return {
+            "backbone": backbone,
+            "sem_seg_head": sem_seg_head,
+            "pixel_mean": cfg.MODEL.PIXEL_MEAN,
+            "pixel_std": cfg.MODEL.PIXEL_STD,
+        }
 
     @property
     def device(self):
@@ -116,7 +142,6 @@ class SemSegFPNHead(nn.Module):
         self,
         input_shape: Dict[str, ShapeSpec],
         *,
-        in_features: List[str],
         num_classes: int,
         conv_dims: int,
         common_stride: int,
@@ -128,8 +153,7 @@ class SemSegFPNHead(nn.Module):
         NOTE: this interface is experimental.
 
         Args:
-            input_shape: shapes of the input features
-            in_features: a list of input feature names to use
+            input_shape: shapes (channels and stride) of the input features
             num_classes: number of classes to predict
             conv_dims: number of output channels for the intermediate conv layers.
             common_stride: the common stride that all features will be upscaled to
@@ -138,23 +162,25 @@ class SemSegFPNHead(nn.Module):
             ignore_value: category id to be ignored during training.
         """
         super().__init__()
-        feature_strides = {k: v.stride for k, v in input_shape.items()}
-        feature_channels = {k: v.channels for k, v in input_shape.items()}
-        self.in_features = in_features
+        input_shape = sorted(input_shape.items(), key=lambda x: x[1].stride)
+        self.in_features = [k for k, v in input_shape]
+        feature_strides = [v.stride for k, v in input_shape]
+        feature_channels = [v.channels for k, v in input_shape]
+
         self.ignore_value = ignore_value
         self.common_stride = common_stride
         self.loss_weight = loss_weight
 
         self.scale_heads = []
-        for in_feature in self.in_features:
+        for in_feature, stride, channels in zip(
+            self.in_features, feature_strides, feature_channels
+        ):
             head_ops = []
-            head_length = max(
-                1, int(np.log2(feature_strides[in_feature]) - np.log2(self.common_stride))
-            )
+            head_length = max(1, int(np.log2(stride) - np.log2(self.common_stride)))
             for k in range(head_length):
                 norm_module = get_norm(norm, conv_dims)
                 conv = Conv2d(
-                    feature_channels[in_feature] if k == 0 else conv_dims,
+                    channels if k == 0 else conv_dims,
                     conv_dims,
                     kernel_size=3,
                     stride=1,
@@ -165,7 +191,7 @@ class SemSegFPNHead(nn.Module):
                 )
                 weight_init.c2_msra_fill(conv)
                 head_ops.append(conv)
-                if feature_strides[in_feature] != self.common_stride:
+                if stride != self.common_stride:
                     head_ops.append(
                         nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False)
                     )
@@ -177,8 +203,9 @@ class SemSegFPNHead(nn.Module):
     @classmethod
     def from_config(cls, cfg, input_shape: Dict[str, ShapeSpec]):
         return {
-            "input_shape": input_shape,
-            "in_features": cfg.MODEL.SEM_SEG_HEAD.IN_FEATURES,
+            "input_shape": {
+                k: v for k, v in input_shape.items() if k in cfg.MODEL.SEM_SEG_HEAD.IN_FEATURES
+            },
             "ignore_value": cfg.MODEL.SEM_SEG_HEAD.IGNORE_VALUE,
             "num_classes": cfg.MODEL.SEM_SEG_HEAD.NUM_CLASSES,
             "conv_dims": cfg.MODEL.SEM_SEG_HEAD.CONVS_DIM,

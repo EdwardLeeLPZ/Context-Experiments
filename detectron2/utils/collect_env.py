@@ -56,20 +56,16 @@ def collect_env_info():
     has_gpu = torch.cuda.is_available()  # true for both CUDA & ROCM
     torch_version = torch.__version__
 
-    # NOTE: the use of CUDA_HOME and ROCM_HOME requires the CUDA/ROCM build deps, though in
-    # theory detectron2 should be made runnable with only the corresponding runtimes
-    from torch.utils.cpp_extension import CUDA_HOME
+    # NOTE that CUDA_HOME/ROCM_HOME could be None even when CUDA runtime libs are functional
+    from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 
     has_rocm = False
-    if tuple(map(int, torch_version.split(".")[:2])) >= (1, 5):
-        from torch.utils.cpp_extension import ROCM_HOME
-
-        if (getattr(torch.version, "hip", None) is not None) and (ROCM_HOME is not None):
-            has_rocm = True
+    if (getattr(torch.version, "hip", None) is not None) and (ROCM_HOME is not None):
+        has_rocm = True
     has_cuda = has_gpu and (not has_rocm)
 
     data = []
-    data.append(("sys.platform", sys.platform))
+    data.append(("sys.platform", sys.platform))  # check-template.yml depends on it
     data.append(("Python", sys.version.replace("\n", "")))
     data.append(("numpy", np.__version__))
 
@@ -96,7 +92,7 @@ def collect_env_info():
                 cxx = cxx.decode("utf-8").strip().split("\n")[0]
             except subprocess.SubprocessError:
                 cxx = "Not found"
-            data.append(("Compiler", cxx))
+            data.append(("Compiler ($CXX)", cxx))
 
             if has_cuda and CUDA_HOME is not None:
                 try:
@@ -106,11 +102,20 @@ def collect_env_info():
                 except subprocess.SubprocessError:
                     nvcc = "Not found"
                 data.append(("CUDA compiler", nvcc))
+        if has_cuda and sys.platform != "win32":
+            try:
+                so_file = importlib.util.find_spec("detectron2._C").origin
+            except ImportError:
+                pass
+            else:
+                data.append(
+                    ("detectron2 arch flags", detect_compute_compatibility(CUDA_HOME, so_file))
+                )
     else:
         # print compilers that are used to build extension
         data.append(("Compiler", _C.get_compiler_version()))
         data.append(("CUDA compiler", _C.get_cuda_version()))  # cuda or hip
-        if has_cuda:
+        if has_cuda and getattr(_C, "has_cuda", lambda: True)():
             data.append(
                 ("detectron2 arch flags", detect_compute_compatibility(CUDA_HOME, _C.__file__))
             )
@@ -130,10 +135,10 @@ def collect_env_info():
             data.append(("GPU " + ",".join(devids), name))
 
         if has_rocm:
-            msg = " - invalid!" if not os.path.isdir(ROCM_HOME) else ""
+            msg = " - invalid!" if not (ROCM_HOME and os.path.isdir(ROCM_HOME)) else ""
             data.append(("ROCM_HOME", str(ROCM_HOME) + msg))
         else:
-            msg = " - invalid!" if not os.path.isdir(CUDA_HOME) else ""
+            msg = " - invalid!" if not (CUDA_HOME and os.path.isdir(CUDA_HOME)) else ""
             data.append(("CUDA_HOME", str(CUDA_HOME) + msg))
 
             cuda_arch_list = os.environ.get("TORCH_CUDA_ARCH_LIST", None)
@@ -166,6 +171,13 @@ def collect_env_info():
         pass
 
     try:
+        import iopath
+
+        data.append(("iopath", iopath.__version__))
+    except (ImportError, AttributeError):
+        pass
+
+    try:
         import cv2
 
         data.append(("cv2", cv2.__version__))
@@ -178,18 +190,20 @@ def collect_env_info():
 
 if __name__ == "__main__":
     try:
-        import detectron2  # noqa
+        from detectron2.utils.collect_env import collect_env_info as f
+
+        print(f())
     except ImportError:
         print(collect_env_info())
-    else:
-        from detectron2.utils.collect_env import collect_env_info
 
-        print(collect_env_info())
     if torch.cuda.is_available():
         for k in range(torch.cuda.device_count()):
             device = f"cuda:{k}"
             try:
                 x = torch.tensor([1, 2.0], dtype=torch.float32)
                 x = x.to(device)
-            except Exception:
-                print(f"Unable to copy tensor to device={device}")
+            except Exception as e:
+                print(
+                    f"Unable to copy tensor to device={device}: {e}. "
+                    "Your CUDA environment is broken."
+                )

@@ -172,7 +172,8 @@ def read_image(file_name, format=None):
         format (str): one of the supported image modes in PIL, or "BGR" or "YUV-BT.601".
 
     Returns:
-        image (np.ndarray): an HWC image in the given format, which is 0-255, uint8 for
+        image (np.ndarray):
+            an HWC image in the given format, which is 0-255, uint8 for
             supported image modes in PIL or "BGR"; float (0-1 for Y) for YUV-BT.601.
     """
     with PathManager.open(file_name, "rb") as f:
@@ -385,8 +386,12 @@ def annotations_to_instances(annos, image_size, mask_format="polygon"):
     if len(annos) and "segmentation" in annos[0]:
         segms = [obj["segmentation"] for obj in annos]
         if mask_format == "polygon":
-            # TODO check type and provide better error
-            masks = PolygonMasks(segms)
+            try:
+                masks = PolygonMasks(segms)
+            except ValueError as e:
+                raise ValueError(
+                    "Failed to use mask_format=='polygon' from the given annotations!"
+                ) from e
         else:
             assert mask_format == "bitmask", mask_format
             masks = []
@@ -407,8 +412,8 @@ def annotations_to_instances(annos, image_size, mask_format="polygon"):
                     raise ValueError(
                         "Cannot convert segmentation of type '{}' to BitMasks!"
                         "Supported types are: polygons as list[list[float] or ndarray],"
-                        " COCO-style RLE as a dict, or a full-image segmentation mask "
-                        "as a 2D ndarray.".format(type(segm))
+                        " COCO-style RLE as a dict, or a binary segmentation mask "
+                        " in a 2D numpy array of shape HxW.".format(type(segm))
                     )
             # torch.from_numpy does not support array with negative stride.
             masks = BitMasks(

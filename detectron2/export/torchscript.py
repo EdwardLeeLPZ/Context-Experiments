@@ -8,18 +8,20 @@ from detectron2.utils.file_io import PathManager
 
 from .torchscript_patch import freeze_training_mode, patch_instances
 
+__all__ = ["scripting_with_instances", "dump_torchscript_IR"]
 
-def export_torchscript_with_instances(model, fields):
+
+def scripting_with_instances(model, fields):
     """
     Run :func:`torch.jit.script` on a model that uses the :class:`Instances` class. Since
     attributes of :class:`Instances` are "dynamically" added in eager mode，it is difficult
-    for torchscript to support it out of the box. This function is made to support scripting
+    for scripting to support it out of the box. This function is made to support scripting
     a model that uses :class:`Instances`. It does the following:
 
     1. Create a scriptable ``new_Instances`` class which behaves similarly to ``Instances``,
        but with all attributes been "static".
        The attributes need to be statically declared in the ``fields`` argument.
-    2. Register ``new_Instances`` to torchscript, and force torchscript to
+    2. Register ``new_Instances``, and force scripting compiler to
        use it when trying to compile ``Instances``.
 
     After this function, the process will be reverted. User should be able to script another model
@@ -29,43 +31,35 @@ def export_torchscript_with_instances(model, fields):
         Assume that ``Instances`` in the model consist of two attributes named
         ``proposal_boxes`` and ``objectness_logits`` with type :class:`Boxes` and
         :class:`Tensor` respectively during inference. You can call this function like:
-
         ::
             fields = {"proposal_boxes": Boxes, "objectness_logits": torch.Tensor}
-            torchscipt_model =  export_torchscript_with_instances(model, fields)
+            torchscipt_model =  scripting_with_instances(model, fields)
 
     Note:
-        Currently we only support models in evaluation mode.
+        It only support models in evaluation mode.
 
     Args:
-        model (nn.Module): The input model to be exported to torchscript.
+        model (nn.Module): The input model to be exported by scripting.
         fields (Dict[str, type]): Attribute names and corresponding type that
             ``Instances`` will use in the model. Note that all attributes used in ``Instances``
             need to be added, regardless of whether they are inputs/outputs of the model.
             Data type not defined in detectron2 is not supported for now.
 
     Returns:
-        torch.jit.ScriptModule: the input model in torchscript format
+        torch.jit.ScriptModule: the model in torchscript format
     """
     assert TORCH_VERSION >= (1, 8), "This feature is not available in PyTorch < 1.8"
     assert (
         not model.training
     ), "Currently we only support exporting models in evaluation mode to torchscript"
 
-    from copy import deepcopy
-
-    # TODO: __prepare_scriptable__ was reverted from pytorch: D25061862
-    # We hack it here until it's added back
-    model = deepcopy(model)
-    for m in model.modules():
-        for name, subm in m.named_children():
-            if hasattr(subm, "__tmp_prepare_scriptable__"):
-                newm = subm.__tmp_prepare_scriptable__()
-                setattr(m, name, newm)
-
     with freeze_training_mode(model), patch_instances(fields):
         scripted_model = torch.jit.script(model)
         return scripted_model
+
+
+# alias for old name
+export_torchscript_with_instances = scripting_with_instances
 
 
 def dump_torchscript_IR(model, dir):
@@ -77,6 +71,7 @@ def dump_torchscript_IR(model, dir):
         model (TracedModule or ScriptModule): traced or scripted module
         dir (str): output directory to dump files.
     """
+    # TODO: support ScriptFunction as well
     PathManager.mkdirs(dir)
 
     def _get_script_mod(mod):

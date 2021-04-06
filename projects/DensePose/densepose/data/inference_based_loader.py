@@ -24,10 +24,10 @@ def _grouper(iterable: Iterable[Any], n: int, fillvalue=None) -> Iterator[Tuple[
             except StopIteration:
                 if values:
                     values.extend([fillvalue] * (n - len(values)))
-                    yield tuple(values)
+                    yield tuple(values)  # pyre-ignore[7]
                 return
             values.append(value)
-        yield tuple(values)
+        yield tuple(values)  # pyre-ignore[7]
 
 
 class ScoreBasedFilter:
@@ -121,7 +121,11 @@ class InferenceBasedLoader:
         data_batches: List[SampledData] = []
         batched_images = _grouper(images, self.inference_batch_size)
         for batch in batched_images:
-            batch = [{"image": img.to(self.model.device)} for img in batch if img is not None]
+            batch = [
+                {"image": img.to(self.model.device)}  # pyre-ignore[16]
+                for img in batch
+                if img is not None
+            ]
             if not batch:
                 continue
             with torch.no_grad():
@@ -129,12 +133,14 @@ class InferenceBasedLoader:
             for model_output_i, batch_i in zip(model_output, batch):
                 model_output_i["image"] = batch_i["image"]
             model_output_filtered = (
-                model_output if self.data_filter is None else self.data_filter(model_output)
+                model_output
+                if self.data_filter is None
+                else self.data_filter(model_output)  # pyre-ignore[29]
             )
             data = (
                 model_output_filtered
                 if self.data_sampler is None
-                else self.data_sampler(model_output_filtered)
+                else self.data_sampler(model_output_filtered)  # pyre-ignore[29]
             )
             for data_i in data:
                 if len(data_i["instances"]):

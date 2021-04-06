@@ -33,10 +33,11 @@ data: List[Dict] = DatasetCatalog.get("my_dataset")
 ```
 
 Here, the snippet associates a dataset named "my_dataset" with a function that returns the data.
-The function must return the same data if called multiple times.
+The function must return the same data (with same order) if called multiple times.
 The registration stays effective until the process exits.
 
-The function can do arbitrary things and should return the data in either of the following formats:
+The function can do arbitrary things and should return the data in `list[dict]`, each dict in either
+of the following formats:
 1. Detectron2's standard dataset dict, described below. This will make it work with many other builtin
    features in detectron2, so it's recommended to use it when it's sufficient.
 2. Any custom format. You can also return arbitrary dicts in your own format,
@@ -74,7 +75,7 @@ and the required fields vary based on what the dataloader or the task needs (see
     - pan_seg_file_name, segments_info
 ```
 
-+ `file_name`: the full path to the image file. Rotation or flipping may be applied if the image has EXIF metadata.
++ `file_name`: the full path to the image file.
 + `height`, `width`: integer. The shape of the image.
 + `image_id` (str or int): a unique id that identifies this image. Required by many
   evaluators to identify the images, but a dataset may use it for different purposes.
@@ -227,7 +228,7 @@ Some additional metadata that are specific to the evaluation of certain datasets
   to contiguous ids in [0, num_categories). It is useful for evaluation only.
 
 * `json_file`: The COCO annotation json file. Used by COCO evaluation for COCO-format datasets.
-* `panoptic_root`, `panoptic_json`: Used by panoptic evaluation.
+* `panoptic_root`, `panoptic_json`: Used by COCO-format panoptic evaluation.
 * `evaluator_type`: Used by the builtin main training script to select
    evaluator. Don't use it in a new training script.
    You can just provide the [DatasetEvaluator](../modules/evaluation.html#detectron2.evaluation.DatasetEvaluator)

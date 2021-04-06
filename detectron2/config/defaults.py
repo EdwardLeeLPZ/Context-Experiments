@@ -86,6 +86,7 @@ _C.INPUT.MASK_FORMAT = "polygon"  # alternative: "bitmask"
 # -----------------------------------------------------------------------------
 _C.DATASETS = CN()
 # List of the dataset names for training. Must be registered in DatasetCatalog
+# Samples from these datasets will be merged and used as one dataset.
 _C.DATASETS.TRAIN = ()
 # List of the pre-computed proposal files for training, which must be consistent
 # with datasets listed in DATASETS.TRAIN.
@@ -234,6 +235,8 @@ _C.MODEL.RPN.POST_NMS_TOPK_TRAIN = 2000
 _C.MODEL.RPN.POST_NMS_TOPK_TEST = 1000
 # NMS threshold used on RPN proposals
 _C.MODEL.RPN.NMS_THRESH = 0.7
+# Set this to -1 to use the same number of output channels as input channels.
+_C.MODEL.RPN.CONV_DIMS = [-1]
 
 # ---------------------------------------------------------------------------- #
 # ROI HEADS options
@@ -400,7 +403,7 @@ _C.MODEL.PANOPTIC_FPN = CN()
 _C.MODEL.PANOPTIC_FPN.INSTANCE_LOSS_WEIGHT = 1.0
 
 # options when combining instance & semantic segmentation outputs
-_C.MODEL.PANOPTIC_FPN.COMBINE = CN({"ENABLED": True})
+_C.MODEL.PANOPTIC_FPN.COMBINE = CN({"ENABLED": True})  # "COMBINE.ENABLED" is deprecated & not used
 _C.MODEL.PANOPTIC_FPN.COMBINE.OVERLAP_THRESH = 0.5
 _C.MODEL.PANOPTIC_FPN.COMBINE.STUFF_AREA_LIMIT = 4096
 _C.MODEL.PANOPTIC_FPN.COMBINE.INSTANCES_CONFIDENCE_THRESH = 0.5
@@ -528,9 +531,9 @@ _C.SOLVER.WARMUP_METHOD = "linear"
 # Save a checkpoint after every this number of iterations
 _C.SOLVER.CHECKPOINT_PERIOD = 5000
 
-# Number of images per batch across all machines.
-# If we have 16 GPUs and IMS_PER_BATCH = 32,
-# each GPU will see 2 images per batch.
+# Number of images per batch across all machines. This is also the number
+# of training images per step (i.e. per iteration). If we use 16 GPUs
+# and IMS_PER_BATCH = 32, each GPU will see 2 images per batch.
 # May be adjusted automatically if REFERENCE_WORLD_SIZE is set.
 _C.SOLVER.IMS_PER_BATCH = 16
 

@@ -67,7 +67,7 @@ class Decoder(nn.Module):
                         nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False)
                     )
             self.scale_heads.append(nn.Sequential(*head_ops))
-            self.add_module(in_feature, self.scale_heads[-1])
+            self.add_module(in_feature, self.scale_heads[-1])  # pyre-ignore[16]
         self.predictor = Conv2d(conv_dims, num_classes, kernel_size=1, stride=1, padding=0)
         weight_init.c2_msra_fill(self.predictor)
 
@@ -145,17 +145,17 @@ class DensePoseROIHeads(StandardROIHeads):
         if not self.densepose_on:
             return {} if self.training else instances
 
-        features = [features[f] for f in self.in_features]
+        features_list = [features[f] for f in self.in_features]
         if self.training:
             proposals, _ = select_foreground_proposals(instances, self.num_classes)
-            features, proposals = self.densepose_data_filter(features, proposals)
+            features_list, proposals = self.densepose_data_filter(features_list, proposals)
             if len(proposals) > 0:
                 proposal_boxes = [x.proposal_boxes for x in proposals]
 
                 if self.use_decoder:
-                    features = [self.decoder(features)]
+                    features_list = [self.decoder(features_list)]  # pyre-ignore[16]
 
-                features_dp = self.densepose_pooler(features, proposal_boxes)
+                features_dp = self.densepose_pooler(features_list, proposal_boxes)
                 densepose_head_outputs = self.densepose_head(features_dp)
                 densepose_predictor_outputs = self.densepose_predictor(densepose_head_outputs)
                 densepose_loss_dict = self.densepose_losses(
@@ -166,9 +166,9 @@ class DensePoseROIHeads(StandardROIHeads):
             pred_boxes = [x.pred_boxes for x in instances]
 
             if self.use_decoder:
-                features = [self.decoder(features)]
+                features_list = [self.decoder(features_list)]
 
-            features_dp = self.densepose_pooler(features, pred_boxes)
+            features_dp = self.densepose_pooler(features_list, pred_boxes)
             if len(features_dp) > 0:
                 densepose_head_outputs = self.densepose_head(features_dp)
                 densepose_predictor_outputs = self.densepose_predictor(densepose_head_outputs)

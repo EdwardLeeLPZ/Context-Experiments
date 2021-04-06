@@ -345,6 +345,7 @@ class Res5ROIHeads(ROIHeads):
     The ROIHeads in a typical "C4" R-CNN model, where
     the box and mask head share the cropping and
     the per-region feature computation by a Res5 block.
+    See :paper:`ResNet` Appendix A.
     """
 
     @configurable
@@ -375,6 +376,8 @@ class Res5ROIHeads(ROIHeads):
         super().__init__(**kwargs)
         self.in_features = in_features
         self.pooler = pooler
+        if isinstance(res5, (list, tuple)):
+            res5 = nn.Sequential(*res5)
         self.res5 = res5
         self.box_predictor = box_predictor
         self.mask_on = mask_head is not None
@@ -756,7 +759,7 @@ class StandardROIHeads(ROIHeads):
                 "pred_boxes" and "pred_classes" to exist.
 
         Returns:
-            instances (list[Instances]):
+            list[Instances]:
                 the same `Instances` objects, with extra
                 fields such as `pred_masks` or `pred_keypoints`.
         """
@@ -823,11 +826,7 @@ class StandardROIHeads(ROIHeads):
             In inference, update `instances` with new fields "pred_masks" and return it.
         """
         if not self.mask_on:
-            # https://github.com/pytorch/pytorch/issues/43942
-            if self.training:
-                return {}
-            else:
-                return instances
+            return {} if self.training else instances
 
         if self.training:
             # head is only trained on positive proposals.
@@ -838,8 +837,7 @@ class StandardROIHeads(ROIHeads):
             boxes = [x.proposal_boxes if self.training else x.pred_boxes for x in instances]
             features = self.mask_pooler(features, boxes)
         else:
-            # https://github.com/pytorch/pytorch/issues/41448
-            features = dict([(f, features[f]) for f in self.mask_in_features])
+            features = {f: features[f] for f in self.mask_in_features}
         return self.mask_head(features, instances)
 
     def _forward_keypoint(self, features: Dict[str, torch.Tensor], instances: List[Instances]):
@@ -858,10 +856,7 @@ class StandardROIHeads(ROIHeads):
             In inference, update `instances` with new fields "pred_keypoints" and return it.
         """
         if not self.keypoint_on:
-            if self.training:
-                return {}
-            else:
-                return instances
+            return {} if self.training else instances
 
         if self.training:
             # head is only trained on positive proposals with >=1 visible keypoints.
@@ -873,5 +868,5 @@ class StandardROIHeads(ROIHeads):
             boxes = [x.proposal_boxes if self.training else x.pred_boxes for x in instances]
             features = self.keypoint_pooler(features, boxes)
         else:
-            features = dict([(f, features[f]) for f in self.keypoint_in_features])
+            features = {f: features[f] for f in self.keypoint_in_features}
         return self.keypoint_head(features, instances)
