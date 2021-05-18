@@ -23,6 +23,7 @@ from detectron2.data.samplers import TrainingSampler
 from detectron2.utils.comm import get_world_size
 
 from densepose.config import get_bootstrap_dataset_config
+from densepose.modeling import build_densepose_embedder
 
 from .combined_loader import CombinedDataLoader, Loader
 from .dataset_mapper import DatasetMapper
@@ -31,12 +32,14 @@ from .datasets.dataset_type import DatasetType
 from .inference_based_loader import InferenceBasedLoader, ScoreBasedFilter
 from .samplers import (
     DensePoseConfidenceBasedSampler,
+    DensePoseCSEConfidenceBasedSampler,
+    DensePoseCSEUniformSampler,
     DensePoseUniformSampler,
     MaskFromDensePoseSampler,
     PredictionToGroundTruthSampler,
 )
 from .transform import ImageResizeTransform
-from .utils import get_class_to_mesh_name_mapping
+from .utils import get_category_to_class_mapping, get_class_to_mesh_name_mapping
 from .video import (
     FirstKFramesSelector,
     FrameSelectionStrategy,
@@ -286,6 +289,19 @@ def _add_category_maps_to_metadata(cfg: CfgNode):
         logger.info("Category maps for dataset {}: {}".format(dataset_name, meta.category_map))
 
 
+def _add_category_info_to_bootstrapping_metadata(dataset_name: str, dataset_cfg: CfgNode):
+    meta = MetadataCatalog.get(dataset_name)
+    meta.category_to_class_mapping = get_category_to_class_mapping(dataset_cfg)
+    meta.categories = dataset_cfg.CATEGORIES
+    meta.max_count_per_category = dataset_cfg.MAX_COUNT_PER_CATEGORY
+    logger = logging.getLogger(__name__)
+    logger.info(
+        "Category to class mapping for dataset {}: {}".format(
+            dataset_name, meta.category_to_class_mapping
+        )
+    )
+
+
 def _maybe_add_class_to_mesh_name_map_to_metadata(dataset_names: List[str], cfg: CfgNode):
     for dataset_name in dataset_names:
         meta = MetadataCatalog.get(dataset_name)
@@ -518,6 +534,7 @@ def build_bootstrap_dataset(dataset_name: str, cfg: CfgNode) -> Sequence[torch.T
             [N, C, H, W] of type float32
     """
     logger = logging.getLogger(__name__)
+    _add_category_info_to_bootstrapping_metadata(dataset_name, cfg)
     meta = MetadataCatalog.get(dataset_name)
     factory = BootstrapDatasetFactoryCatalog.get(meta.dataset_type)
     dataset = None
@@ -528,18 +545,18 @@ def build_bootstrap_dataset(dataset_name: str, cfg: CfgNode) -> Sequence[torch.T
     return dataset
 
 
-def build_data_sampler(cfg: CfgNode):
-    if cfg.TYPE == "densepose_uniform":
+def build_data_sampler(cfg: CfgNode, sampler_cfg: CfgNode, embedder: Optional[torch.nn.Module]):
+    if sampler_cfg.TYPE == "densepose_uniform":
         data_sampler = PredictionToGroundTruthSampler()
         # transform densepose pred -> gt
         data_sampler.register_sampler(
             "pred_densepose",
             "gt_densepose",
-            DensePoseUniformSampler(count_per_class=cfg.COUNT_PER_CLASS),
+            DensePoseUniformSampler(count_per_class=sampler_cfg.COUNT_PER_CLASS),
         )
         data_sampler.register_sampler("pred_densepose", "gt_masks", MaskFromDensePoseSampler())
         return data_sampler
-    elif cfg.TYPE == "densepose_UV_confidence":
+    elif sampler_cfg.TYPE == "densepose_UV_confidence":
         data_sampler = PredictionToGroundTruthSampler()
         # transform densepose pred -> gt
         data_sampler.register_sampler(
@@ -547,13 +564,13 @@ def build_data_sampler(cfg: CfgNode):
             "gt_densepose",
             DensePoseConfidenceBasedSampler(
                 confidence_channel="sigma_2",
-                count_per_class=cfg.COUNT_PER_CLASS,
+                count_per_class=sampler_cfg.COUNT_PER_CLASS,
                 search_proportion=0.5,
             ),
         )
         data_sampler.register_sampler("pred_densepose", "gt_masks", MaskFromDensePoseSampler())
         return data_sampler
-    elif cfg.TYPE == "densepose_fine_segm_confidence":
+    elif sampler_cfg.TYPE == "densepose_fine_segm_confidence":
         data_sampler = PredictionToGroundTruthSampler()
         # transform densepose pred -> gt
         data_sampler.register_sampler(
@@ -561,13 +578,13 @@ def build_data_sampler(cfg: CfgNode):
             "gt_densepose",
             DensePoseConfidenceBasedSampler(
                 confidence_channel="fine_segm_confidence",
-                count_per_class=cfg.COUNT_PER_CLASS,
+                count_per_class=sampler_cfg.COUNT_PER_CLASS,
                 search_proportion=0.5,
             ),
         )
         data_sampler.register_sampler("pred_densepose", "gt_masks", MaskFromDensePoseSampler())
         return data_sampler
-    elif cfg.TYPE == "densepose_coarse_segm_confidence":
+    elif sampler_cfg.TYPE == "densepose_coarse_segm_confidence":
         data_sampler = PredictionToGroundTruthSampler()
         # transform densepose pred -> gt
         data_sampler.register_sampler(
@@ -575,14 +592,48 @@ def build_data_sampler(cfg: CfgNode):
             "gt_densepose",
             DensePoseConfidenceBasedSampler(
                 confidence_channel="coarse_segm_confidence",
-                count_per_class=cfg.COUNT_PER_CLASS,
+                count_per_class=sampler_cfg.COUNT_PER_CLASS,
+                search_proportion=0.5,
+            ),
+        )
+        data_sampler.register_sampler("pred_densepose", "gt_masks", MaskFromDensePoseSampler())
+        return data_sampler
+    elif sampler_cfg.TYPE == "densepose_cse_uniform":
+        assert embedder is not None
+        data_sampler = PredictionToGroundTruthSampler()
+        # transform densepose pred -> gt
+        data_sampler.register_sampler(
+            "pred_densepose",
+            "gt_densepose",
+            DensePoseCSEUniformSampler(
+                cfg=cfg,
+                use_gt_categories=sampler_cfg.USE_GROUND_TRUTH_CATEGORIES,
+                embedder=embedder,
+                count_per_class=sampler_cfg.COUNT_PER_CLASS,
+            ),
+        )
+        data_sampler.register_sampler("pred_densepose", "gt_masks", MaskFromDensePoseSampler())
+        return data_sampler
+    elif sampler_cfg.TYPE == "densepose_cse_coarse_segm_confidence":
+        assert embedder is not None
+        data_sampler = PredictionToGroundTruthSampler()
+        # transform densepose pred -> gt
+        data_sampler.register_sampler(
+            "pred_densepose",
+            "gt_densepose",
+            DensePoseCSEConfidenceBasedSampler(
+                cfg=cfg,
+                use_gt_categories=sampler_cfg.USE_GROUND_TRUTH_CATEGORIES,
+                embedder=embedder,
+                confidence_channel="coarse_segm_confidence",
+                count_per_class=sampler_cfg.COUNT_PER_CLASS,
                 search_proportion=0.5,
             ),
         )
         data_sampler.register_sampler("pred_densepose", "gt_masks", MaskFromDensePoseSampler())
         return data_sampler
 
-    raise ValueError(f"Unknown data sampler type {cfg.TYPE}")
+    raise ValueError(f"Unknown data sampler type {sampler_cfg.TYPE}")
 
 
 def build_data_filter(cfg: CfgNode):
@@ -593,12 +644,16 @@ def build_data_filter(cfg: CfgNode):
 
 
 def build_inference_based_loader(
-    cfg: CfgNode, dataset_cfg: CfgNode, model: torch.nn.Module
+    cfg: CfgNode,
+    dataset_cfg: CfgNode,
+    model: torch.nn.Module,
+    embedder: Optional[torch.nn.Module] = None,
 ) -> InferenceBasedLoader:
     """
     Constructs data loader based on inference results of a model.
     """
     dataset = build_bootstrap_dataset(dataset_cfg.DATASET, dataset_cfg.IMAGE_LOADER)
+    meta = MetadataCatalog.get(dataset_cfg.DATASET)
     training_sampler = TrainingSampler(len(dataset))
     data_loader = torch.utils.data.DataLoader(
         dataset,  # pyre-ignore[6]
@@ -611,11 +666,12 @@ def build_inference_based_loader(
     return InferenceBasedLoader(
         model,
         data_loader=data_loader,
-        data_sampler=build_data_sampler(dataset_cfg.DATA_SAMPLER),
+        data_sampler=build_data_sampler(cfg, dataset_cfg.DATA_SAMPLER, embedder),
         data_filter=build_data_filter(dataset_cfg.FILTER),
         shuffle=True,
         batch_size=dataset_cfg.INFERENCE.OUTPUT_BATCH_SIZE,
         inference_batch_size=dataset_cfg.INFERENCE.INPUT_BATCH_SIZE,
+        category_to_class_mapping=meta.category_to_class_mapping,
     )
 
 
@@ -632,10 +688,11 @@ def build_inference_based_loaders(
 ) -> Tuple[List[InferenceBasedLoader], List[float]]:
     loaders = []
     ratios = []
+    embedder = build_densepose_embedder(cfg)
     for dataset_spec in cfg.BOOTSTRAP_DATASETS:
         dataset_cfg = get_bootstrap_dataset_config().clone()
         dataset_cfg.merge_from_other_cfg(CfgNode(dataset_spec))
-        loader = build_inference_based_loader(cfg, dataset_cfg, model)
+        loader = build_inference_based_loader(cfg, dataset_cfg, model, embedder)
         loaders.append(loader)
         ratios.append(dataset_cfg.RATIO)
     return loaders, ratios
@@ -644,12 +701,15 @@ def build_inference_based_loaders(
 def build_video_list_dataset(meta: Metadata, cfg: CfgNode):
     video_list_fpath = meta.video_list_fpath
     video_base_path = meta.video_base_path
+    category = meta.category
     if cfg.TYPE == "video_keyframe":
         frame_selector = build_frame_selector(cfg.SELECT)
         transform = build_transform(cfg.TRANSFORM, data_type="image")
         video_list = video_list_from_file(video_list_fpath, video_base_path)
         keyframe_helper_fpath = cfg.KEYFRAME_HELPER if hasattr(cfg, "KEYFRAME_HELPER") else None
-        return VideoKeyframeDataset(video_list, frame_selector, transform, keyframe_helper_fpath)
+        return VideoKeyframeDataset(
+            video_list, category, frame_selector, transform, keyframe_helper_fpath
+        )
 
 
 class _BootstrapDatasetFactoryCatalog(UserDict):

@@ -141,7 +141,7 @@ def get_default_optimizer_params(
 ):
     """
     Get default param list for optimizer, with support for a few types of
-    overrides. If not overrides needed, this is equivalent to `model.parameters()`.
+    overrides. If no overrides needed, this is equivalent to `model.parameters()`.
 
     Args:
         base_lr: lr for every group by default. Can be omitted to use the one in optimizer.
@@ -246,7 +246,7 @@ def build_lr_scheduler(
     sched = WarmupParamScheduler(
         sched,
         cfg.SOLVER.WARMUP_FACTOR,
-        cfg.SOLVER.WARMUP_ITERS / cfg.SOLVER.MAX_ITER,
+        min(cfg.SOLVER.WARMUP_ITERS / cfg.SOLVER.MAX_ITER, 1.0),
         cfg.SOLVER.WARMUP_METHOD,
     )
     return LRMultiplier(optimizer, multiplier=sched, max_iter=cfg.SOLVER.MAX_ITER)

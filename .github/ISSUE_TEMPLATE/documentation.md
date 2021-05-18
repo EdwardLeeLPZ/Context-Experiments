@@ -1,12 +1,12 @@
 ---
-name: "\U0001F4DA Documentation Issues"
-about: Docs or comments are missing or inaccurate
+name: "\U0001F4DA Documentation Improvements"
+about: Suggest an improvement about existing documentation, comments, website or tutorials.
 labels: documentation
 
 ---
 
-## 📚 Documentation
+## 📚 Documentation Improvements
 
-* Link to the relevant documentation/comment:
+* Provide a link to the relevant documentation/comment/tutorial:
 
-* What is missing or inaccurate?
+* How should  the above documentation/comment/tutorial improve:

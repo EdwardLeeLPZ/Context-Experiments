@@ -46,9 +46,11 @@ class HookBase:
            between :meth:`before_step` and :meth:`after_step` (e.g., timer) to
            function properly.
 
-    Attributes:
-        trainer (TrainerBase): A weak reference to the trainer object. Set by the trainer
-            when the hook is registered.
+    """
+
+    trainer: "TrainerBase" = None
+    """
+    A weak reference to the trainer object. Set by the trainer when the hook is registered.
     """
 
     def before_train(self):
@@ -75,6 +77,13 @@ class HookBase:
         """
         pass
 
+    def state_dict(self):
+        """
+        Hooks are stateless by default, but can be made checkpointable by
+        implementing `state_dict` and `load_state_dict`.
+        """
+        return {}
+
 
 class TrainerBase:
     """
@@ -97,8 +106,8 @@ class TrainerBase:
 
     def __init__(self) -> None:
         self._hooks: List[HookBase] = []
-        self.iter: int
-        self.start_iter: int
+        self.iter: int = 0
+        self.start_iter: int = 0
         self.max_iter: int
         self.storage: EventStorage
         _log_api_usage("trainer." + self.__class__.__name__)
@@ -173,6 +182,36 @@ class TrainerBase:
     def run_step(self):
         raise NotImplementedError
 
+    def state_dict(self):
+        ret = {"iteration": self.iter}
+        hooks_state = {}
+        for h in self._hooks:
+            sd = h.state_dict()
+            if sd:
+                name = type(h).__qualname__
+                if name in hooks_state:
+                    # TODO handle repetitive stateful hooks
+                    continue
+                hooks_state[name] = sd
+        if hooks_state:
+            ret["hooks"] = hooks_state
+        return ret
+
+    def load_state_dict(self, state_dict):
+        logger = logging.getLogger(__name__)
+        self.iter = state_dict["iteration"]
+        for key, value in state_dict.get("hooks", {}).items():
+            for h in self._hooks:
+                try:
+                    name = type(h).__qualname__
+                except AttributeError:
+                    continue
+                if name == key:
+                    h.load_state_dict(value)
+                    break
+            else:
+                logger.warning(f"Cannot find the hook '{key}', its state_dict is ignored.")
+
 
 class SimpleTrainer(TrainerBase):
     """
@@ -232,7 +271,11 @@ class SimpleTrainer(TrainerBase):
         If you want to do something with the losses, you can wrap the model.
         """
         loss_dict = self.model(data)
-        losses = sum(loss_dict.values())
+        if isinstance(loss_dict, torch.Tensor):
+            losses = loss_dict
+            loss_dict = {"total_loss": loss_dict}
+        else:
+            losses = sum(loss_dict.values())
 
         """
         If you need to accumulate gradients or do something similar, you can
@@ -292,6 +335,15 @@ class SimpleTrainer(TrainerBase):
             if len(metrics_dict) > 1:
                 storage.put_scalars(**metrics_dict)
 
+    def state_dict(self):
+        ret = super().state_dict()
+        ret["optimizer"] = self.optimizer.state_dict()
+        return ret
+
+    def load_state_dict(self, state_dict):
+        super().load_state_dict(state_dict)
+        self.optimizer.load_state_dict(state_dict["optimizer"])
+
 
 class AMPTrainer(SimpleTrainer):
     """
@@ -332,7 +384,11 @@ class AMPTrainer(SimpleTrainer):
 
         with autocast():
             loss_dict = self.model(data)
-            losses = sum(loss_dict.values())
+            if isinstance(loss_dict, torch.Tensor):
+                losses = loss_dict
+                loss_dict = {"total_loss": loss_dict}
+            else:
+                losses = sum(loss_dict.values())
 
         self.optimizer.zero_grad()
         self.grad_scaler.scale(losses).backward()
@@ -341,3 +397,12 @@ class AMPTrainer(SimpleTrainer):
 
         self.grad_scaler.step(self.optimizer)
         self.grad_scaler.update()
+
+    def state_dict(self):
+        ret = super().state_dict()
+        ret["grad_scaler"] = self.grad_scaler.state_dict()
+        return ret
+
+    def load_state_dict(self, state_dict):
+        super().load_state_dict(state_dict)
+        self.grad_scaler.load_state_dict(state_dict["grad_scaler"])

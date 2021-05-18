@@ -81,6 +81,8 @@ class SoftEmbeddingLoss:
             j_valid = interpolator.j_valid * (  # pyre-ignore[16]
                 packed_annotations.vertex_mesh_ids_gt == mesh_id
             )
+            if not torch.any(j_valid):
+                continue
             # extract estimated embeddings for valid points
             # -> tensor [J, D]
             vertex_embeddings_i = normalize_embeddings(
@@ -114,7 +116,11 @@ class SoftEmbeddingLoss:
             )
             losses[mesh_name] = (-geodist_softmax_values * embdist_logsoftmax_values).sum(1).mean()
 
-        for mesh_name in embedder.mesh_names:  # pyre-ignore[16]
+        # pyre-fixme[29]:
+        #  `Union[BoundMethod[typing.Callable(torch.Tensor.__iter__)[[Named(self,
+        #  torch.Tensor)], typing.Iterator[typing.Any]], torch.Tensor], nn.Module,
+        #  torch.Tensor]` is not a function.
+        for mesh_name in embedder.mesh_names:
             if mesh_name not in losses:
                 losses[mesh_name] = self.fake_value(
                     densepose_predictor_outputs, embedder, mesh_name
@@ -123,7 +129,11 @@ class SoftEmbeddingLoss:
 
     def fake_values(self, densepose_predictor_outputs: Any, embedder: nn.Module):
         losses = {}
-        for mesh_name in embedder.mesh_names:  # pyre-ignore[16]
+        # pyre-fixme[29]:
+        #  `Union[BoundMethod[typing.Callable(torch.Tensor.__iter__)[[Named(self,
+        #  torch.Tensor)], typing.Iterator[typing.Any]], torch.Tensor], nn.Module,
+        #  torch.Tensor]` is not a function.
+        for mesh_name in embedder.mesh_names:
             losses[mesh_name] = self.fake_value(densepose_predictor_outputs, embedder, mesh_name)
         return losses
 

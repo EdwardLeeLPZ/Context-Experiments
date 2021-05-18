@@ -353,7 +353,7 @@ class Visualizer:
                 color channels. The image is required to be in RGB format since that
                 is a requirement of the Matplotlib library. The image is also expected
                 to be in the range [0, 255].
-            metadata (Metadata): image metadata.
+            metadata (Metadata): dataset metadata (e.g. class names and colors)
             instance_mode (ColorMode): defines one of the pre-defined style for drawing
                 instances on an image.
         """
@@ -631,7 +631,7 @@ class Visualizer:
         Returns:
             output (VisImage): image object with visualizations.
         """
-        num_instances = None
+        num_instances = 0
         if boxes is not None:
             boxes = self._convert_boxes(boxes)
             num_instances = len(boxes)
