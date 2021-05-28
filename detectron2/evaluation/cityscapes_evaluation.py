@@ -107,6 +107,8 @@ class CityscapesInstanceEvaluator(CityscapesEvaluator):
 
                 # add refined box data
                 json_file["refined_boxes"] = []
+                single_frame_mask_output_path = os.path.join(mask_output_path, basename)
+                os.makedirs(single_frame_mask_output_path)
                 for idx in range(len(output)):
                     json_file["refined_boxes"].append(
                         {"id": idx, 
@@ -115,12 +117,10 @@ class CityscapesInstanceEvaluator(CityscapesEvaluator):
                     )
 
                     mask = output.pred_masks[idx].numpy().astype("uint8")
-                    png_filename = os.path.join(
-                        mask_output_path, basename + "_{}.png".format(idx)
-                    )
+                    png_filename = os.path.join(single_frame_mask_output_path, "{}.png".format(idx))
                     Image.fromarray(mask * 255).save(png_filename)
 
-                with open(os.path.join(json_output_path, basename + "_context_data.json"), 'w') as outfile:
+                with open(os.path.join(json_output_path, basename + ".json"), 'w') as outfile:
                     json.dump(json_file, outfile, indent=4)
 
             else:
