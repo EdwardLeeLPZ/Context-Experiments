@@ -112,6 +112,7 @@ class CityscapesInstanceEvaluator(CityscapesEvaluator):
                 for idx in range(len(output)):
                     json_file["refined_boxes"].append(
                         {"id": idx, 
+                         "proposal_index": output.nms_survivors[idx].tolist(),
                          "coords": output.pred_boxes.tensor[idx].tolist(),
                          "softmax": output.softmax[idx].tolist()}
                     )
