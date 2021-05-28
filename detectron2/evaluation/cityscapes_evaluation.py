@@ -21,7 +21,7 @@ class CityscapesEvaluator(DatasetEvaluator):
     Base class for evaluation using cityscapes API.
     """
 
-    def __init__(self, dataset_name, json_output_dir):
+    def __init__(self, dataset_name, output_dir):
         """
         Args:
             dataset_name (str): the name of the dataset.
@@ -31,7 +31,7 @@ class CityscapesEvaluator(DatasetEvaluator):
         self._metadata = MetadataCatalog.get(dataset_name)
         self._cpu_device = torch.device("cpu")
         self._logger = logging.getLogger(__name__)
-        self._output_dir = os.path.join(json_output_dir, 'json_records')
+        self._output_dir = os.path.join(output_dir, 'eval_records')
 
     def reset(self):
         self._working_dir = tempfile.TemporaryDirectory(prefix="cityscapes_eval_")
@@ -87,10 +87,12 @@ class CityscapesInstanceEvaluator(CityscapesEvaluator):
                         )
 
                 # save data for context experiment
-                city = basename.split('_')[0]
-                output_path = os.path.join(self._output_dir, city)
-                if not os.path.exists(output_path):
-                    os.makedirs(output_path)
+                json_output_path = os.path.join(self._output_dir, 'json')
+                if not os.path.exists(json_output_path):
+                    os.makedirs(json_output_path)
+                mask_output_path = os.path.join(self._output_dir, 'mask')
+                if not os.path.exists(mask_output_path):
+                    os.makedirs(mask_output_path)
 
                 json_file = {}
 
@@ -98,22 +100,27 @@ class CityscapesInstanceEvaluator(CityscapesEvaluator):
                 json_file["proposals"] = []
                 for idx in range(len(props)):
                     json_file["proposals"].append(
-                        {"coords": props.proposal_boxes.tensor[idx].tolist(),
-                         "softmax": torch.nn.functional.sigmoid(props.objectness_logits[idx]).tolist()}
+                        {"id": idx,
+                         "coords": props.proposal_boxes.tensor[idx].tolist(),
+                         "softmax": torch.sigmoid(props.objectness_logits[idx]).tolist()}
                     )
-
 
                 # add refined box data
                 json_file["refined_boxes"] = []
                 for idx in range(len(output)):
                     json_file["refined_boxes"].append(
-                        {"coords": output.pred_boxes.tensor[idx].tolist(),
+                        {"id": idx, 
+                         "coords": output.pred_boxes.tensor[idx].tolist(),
                          "softmax": output.softmax[idx].tolist()}
                     )
 
-                with open(
-                    os.path.join(output_path, basename + "_context_data.json"),
-                    'w') as outfile:
+                    mask = output.pred_masks[idx].numpy().astype("uint8")
+                    png_filename = os.path.join(
+                        mask_output_path, basename + "_{}.png".format(idx)
+                    )
+                    Image.fromarray(mask * 255).save(png_filename)
+
+                with open(os.path.join(json_output_path, basename + "_context_data.json"), 'w') as outfile:
                     json.dump(json_file, outfile, indent=4)
 
             else:
