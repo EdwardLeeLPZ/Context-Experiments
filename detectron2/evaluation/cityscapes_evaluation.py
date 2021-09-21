@@ -58,6 +58,8 @@ class CityscapesInstanceEvaluator(CityscapesEvaluator):
 
     def process(self, inputs, outputs):
         from cityscapesscripts.helpers.labels import name2label
+        # gradcams = outputs[3]
+        # features = outputs[2]
         proposals = outputs[1]
         outputs = outputs[0]
 
@@ -86,43 +88,58 @@ class CityscapesInstanceEvaluator(CityscapesEvaluator):
                             "{} {} {}\n".format(os.path.basename(png_filename), class_id, score)
                         )
 
-                # save data for context experiment
-                json_output_path = os.path.join(self._output_dir, 'json')
-                if not os.path.exists(json_output_path):
-                    os.makedirs(json_output_path)
-                mask_output_path = os.path.join(self._output_dir, 'mask')
-                if not os.path.exists(mask_output_path):
-                    os.makedirs(mask_output_path)
+                # # save data for context experiment
+                # json_output_path = os.path.join(self._output_dir, 'json')
+                # if not os.path.exists(json_output_path):
+                #     os.makedirs(json_output_path)
+                # mask_output_path = os.path.join(self._output_dir, 'mask')
+                # if not os.path.exists(mask_output_path):
+                #     os.makedirs(mask_output_path)
 
-                json_file = {}
+                # json_file = {}
 
-                # add proposal data
-                json_file["proposals"] = []
-                for idx in range(len(props)):
-                    json_file["proposals"].append(
-                        {"id": idx,
-                         "coords": props.proposal_boxes.tensor[idx].tolist(),
-                         "softmax": torch.sigmoid(props.objectness_logits[idx]).tolist()}
-                    )
+                # # add proposal data
+                # json_file["proposals"] = []
+                # for idx in range(len(props)):
+                #     json_file["proposals"].append(
+                #         {"id": idx,
+                #          "coords": props.proposal_boxes.tensor[idx].tolist(),
+                #          "softmax": torch.sigmoid(props.objectness_logits[idx]).tolist()}
+                #     )
 
-                # add refined box data
-                json_file["refined_boxes"] = []
-                single_frame_mask_output_path = os.path.join(mask_output_path, basename)
-                os.makedirs(single_frame_mask_output_path)
-                for idx in range(len(output)):
-                    json_file["refined_boxes"].append(
-                        {"id": idx, 
-                         "proposal_index": output.nms_survivors[idx].tolist(),
-                         "coords": output.pred_boxes.tensor[idx].tolist(),
-                         "softmax": output.softmax[idx].tolist()}
-                    )
+                # # add refined box data
+                # json_file["refined_boxes"] = []
+                # single_frame_mask_output_path = os.path.join(mask_output_path, basename)
+                # if not os.path.exists(single_frame_mask_output_path):
+                #     os.makedirs(single_frame_mask_output_path)
+                # for idx in range(len(output)):
+                #     json_file["refined_boxes"].append(
+                #         {"id": idx,
+                #          "proposal_index": output.nms_survivors[idx].tolist(),
+                #          "coords": output.pred_boxes.tensor[idx].tolist(),
+                #          "softmax": output.softmax[idx].tolist()}
+                #     )
 
-                    mask = output.pred_masks[idx].numpy().astype("uint8")
-                    png_filename = os.path.join(single_frame_mask_output_path, "{}.png".format(idx))
-                    Image.fromarray(mask * 255).save(png_filename)
+                #     mask = output.pred_masks[idx].numpy().astype("uint8")
+                #     png_filename = os.path.join(single_frame_mask_output_path, "{}.png".format(idx))
+                #     Image.fromarray(mask * 255).save(png_filename)
 
-                with open(os.path.join(json_output_path, basename + ".json"), 'w') as outfile:
-                    json.dump(json_file, outfile, indent=4)
+                # # add feature data
+                # json_file["features"] = []
+                # for feature_map_name in features:
+                #     feature_map = features[feature_map_name].max(dim=1).values
+                #     feature_map = feature_map.to(self._cpu_device)
+                #     json_file["features"].append(
+                #         {"feature_map_name": feature_map_name,
+                #          "feature_map": feature_map.numpy().tolist()}
+                #     )
+
+                # # add gradcam data
+                # json_file["features"] = {"cam": gradcams[0], "coords": gradcams[1], "class_id": gradcams[2]}
+
+
+                # with open(os.path.join(json_output_path, basename + ".json"), 'w') as outfile:
+                #     json.dump(json_file, outfile, indent=4)
 
             else:
                 # Cityscapes requires a prediction file for every ground truth image.
