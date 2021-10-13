@@ -9,7 +9,7 @@ from posixpath import ismount
 from PIL import Image
 from cityscapesscripts.helpers.labels import Label, labels as cs_labels
 
-context_judgement = 'IOA'  # 'IOA' or 'Distance'
+context_judgement = 'Distance'  # 'IOA' or 'Distance'
 # context_IOU_threshold = 0.1
 context_IOA_threshold = 0.1
 context_distance_threshold = 50
@@ -153,17 +153,30 @@ def postNMS_confidence_entropy_analysis(refined_boxes, imagename):
                 'bool') * context['mask'][C_xmin:C_xmax, C_ymin:C_ymax].astype('bool')
             union = foreground['mask'][C_xmin:C_xmax, C_ymin:C_ymax].astype(
                 'bool') + context['mask'][C_xmin:C_xmax, C_ymin:C_ymax].astype('bool')
-            IOU = np.sum(intersection.astype('float')) / (np.sum(union.astype('float')) + 1e-8)
-            if IOU > context_IOU_threshold:
+            area=foreground['mask'][C_xmin:C_xmax, C_ymin:C_ymax].astype('bool')
+            # IOU = np.sum(intersection.astype('float')) / (np.sum(union.astype('float')) + 1e-8)
+            IOA = np.sum(intersection.astype('float')) / (np.sum(area.astype('float')) + 1e-8)
+            # if IOU > context_IOU_threshold:
+            #     record['have_context'] = True
+            #     if foreground['softmax'].index(max(foreground['softmax'])) == context['softmax'].index(max(context['softmax'])):
+            #         record['relevant_context'].append({
+            #             'IOU': IOU,
+            #         })
+            #     else:
+            #         record['irrelevant_context'].append({
+            #             'category': context['softmax'].index(max(context['softmax'])),
+            #             'IOU': IOU,
+            #         })
+            if IOA > context_IOA_threshold:
                 record['have_context'] = True
                 if foreground['softmax'].index(max(foreground['softmax'])) == context['softmax'].index(max(context['softmax'])):
                     record['relevant_context'].append({
-                        'IOU': IOU,
+                        'IOA': IOA,
                     })
                 else:
                     record['irrelevant_context'].append({
                         'category': context['softmax'].index(max(context['softmax'])),
-                        'IOU': IOU,
+                        'IOA': IOA,
                     })
 
         records.append(record)
@@ -416,9 +429,9 @@ def output(output_dir, postNMS_confidence_entropy_records=False, postNMS_APs_wit
         confi = []
         cover = []
         confi_w_relevant_context = []
-        IOU_w_relevant_context = []
+        IOA_w_relevant_context = []
         confi_w_irrelevant_context = []
-        IOU_w_irrelevant_context = []
+        IOA_w_irrelevant_context = []
         for record in postNMS_confidence_entropy_records:
             confi.append(record["confidence"])
             cover.append(record["foreground_coverage"])
@@ -428,10 +441,10 @@ def output(output_dir, postNMS_confidence_entropy_records=False, postNMS_APs_wit
                 entropy_w_context[record["category"]].append(record["entropy"])
                 for cont in record["relevant_context"]:
                     confi_w_relevant_context.append(record["confidence"])
-                    IOU_w_relevant_context.append(cont["IOU"])
+                    IOA_w_relevant_context.append(cont["IOA"])
                 for cont in record["irrelevant_context"]:
                     confi_w_irrelevant_context.append(record["confidence"])
-                    IOU_w_irrelevant_context.append(cont["IOU"])
+                    IOA_w_irrelevant_context.append(cont["IOA"])
             else:
                 confi_wo_context[record["category"]].append(record["confidence"])
                 entropy_wo_context[record["category"]].append(record["entropy"])
@@ -465,13 +478,13 @@ def output(output_dir, postNMS_confidence_entropy_records=False, postNMS_APs_wit
         plt.xlabel('Foreground Coverage')
         plt.ylabel('Confidence')
         plt.savefig(os.path.join(output_dir, 'postNMS_confidence_entropy',
-                    f'foreground_coverage_confidence_{context_IOU_threshold}.jpg'))
+                    f'foreground_coverage_confidence_{context_IOA_threshold}.jpg'))
         plt.close(1)
 
         plt.figure(2)
-        plt.scatter(IOU_w_relevant_context, confi_w_relevant_context,
+        plt.scatter(IOA_w_relevant_context, confi_w_relevant_context,
                     color='red', marker='x', s=1, label='with Relevant Context')
-        plt.scatter(IOU_w_irrelevant_context, confi_w_irrelevant_context,
+        plt.scatter(IOA_w_irrelevant_context, confi_w_irrelevant_context,
                     color='blue', marker='+', s=1, label='with Irrelevant Context')
         plt.title('The Relationship between Confidence and IOU',
                   fontsize=10, fontweight='medium')
@@ -479,7 +492,7 @@ def output(output_dir, postNMS_confidence_entropy_records=False, postNMS_APs_wit
         plt.ylabel('Confidence')
         plt.legend(loc='lower right')
         plt.savefig(os.path.join(output_dir, 'postNMS_confidence_entropy',
-                    f'IOU_confidence_{context_IOU_threshold}.jpg'))
+                    f'IOU_confidence_{context_IOA_threshold}.jpg'))
         plt.close(2)
 
     if postNMS_APs_with_GT_records:
@@ -634,14 +647,14 @@ def output(output_dir, postNMS_confidence_entropy_records=False, postNMS_APs_wit
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--input_dir", type=str,
-                        default='/lhome/peizhli/projects/context_experiments/domain_adaptation/foggyoutputs_wo_NMS/eval_records')
+                        default='/lhome/peizhli/projects/context_experiments/object_detection/outputs/eval_records')
     parser.add_argument("--gt_dir", type=str,
                         default='/lhome/peizhli/datasets/cityscapes/gtFine')
     parser.add_argument("--output_dir", type=str,
-                        default='/lhome/peizhli/projects/context_experiments/domain_adaptation/eval_results')
-    parser.add_argument("--analyse_postNMS_confidence_entropy", action='store_true', default=False)
+                        default='/lhome/peizhli/projects/context_experiments/object_detection/eval_results/postNMS_confidence_entropy_IOA')
+    parser.add_argument("--analyse_postNMS_confidence_entropy", action='store_true', default=True)
     parser.add_argument("--analyse_postNMS_APs_with_GT", action='store_true', default=False)
-    parser.add_argument("--analyse_confidence_entropy_with_GT", action='store_true', default=True)
+    parser.add_argument("--analyse_confidence_entropy_with_GT", action='store_true', default=False)
     args = parser.parse_args()
     for context_IOA_threshold in threshold_list:
         print(f'Results with [context_IOA_threshold = {context_IOA_threshold}]')
