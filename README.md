@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Context-Experiments
 ### Several experiments that analyze the influence of context on the detection effect and separate contextual information from features
 <img src=".github/Detectron2-Logo-Horz.svg" width="300" >
@@ -58,4 +57,3 @@ If you use Detectron2 in your research or wish to refer to the baseline results 
   year =         {2019}
 }
 ```
->>>>>>> dev/context_measuring
